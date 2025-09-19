@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Phaser from "phaser";
+import { nextFact } from "./data/facts.js";
+
 
 /**
  * MicroMedics — Investor Demo Build (v3)
@@ -17,7 +19,7 @@ export default function MicroMedicsGame() {
   const gameRef = useRef(null);
 
   // React HUD KPIs (visible to investors at all times)
-  const [hud, setHud] = useState({ score: 0, health: 100, energy: 0, level: 1 });
+  const [hud, setHud] = useState({ score: 0, health: 3, energy: 0, level: 1 });
   const [stars, setStars] = useState(0);
   const [facts, setFacts] = useState([]);
   const [systems, setSystems] = useState({ heart: false, lungs: false });
@@ -48,26 +50,30 @@ export default function MicroMedicsGame() {
 
     // global state visible to scenes
     const G = {
-      score: 0, health: 100, energy: 0, level: 1,
+      score: 0, health: 3, energy: 0, level: 1,
       powerMode: false, powerTimer: 0,
       stars: 0,
       systems: { heart: false, lungs: false },
       facts: [],
+      factIndex: { heart: 0, lungs: 0 },
       startTimestamp: Date.now(),
-      get playtimeSec() { return Math.floor((Date.now() - this.startTimestamp) / 1000); },
+      get playtimeSec() { 
+        return Math.floor((Date.now() - this.startTimestamp) / 1000); 
+      },
       resetStatsForLevel() {
-        this.health = 100; this.energy = 0; this.powerMode = false; this.powerTimer = 0;
+        this.health = 3; this.energy = 0; this.powerMode = false; this.powerTimer = 0;
       },
       syncHud() {
         setHudRef.current({ score: this.score, health: this.health, energy: this.energy, level: this.level });
         setPlaytimeRef.current(this.playtimeSec);
       },
-      persist() { saveProgress({ stars: this.stars, systems: this.systems, facts: this.facts }); },
+      persist() { saveProgress({ stars: this.stars, systems: this.systems, facts: this.facts, factIndex: this.factIndex }); },
       load() {
         const p = loadProgress(); if (!p) return;
         this.stars = p.stars ?? 0;
         this.systems = { heart: !!p.systems?.heart, lungs: !!p.systems?.lungs };
         this.facts = Array.isArray(p.facts) ? p.facts : [];
+        this.factIndex = p.factIndex || { heart: 0, lungs: 0 };
       }
     };
     G.load();
@@ -124,17 +130,87 @@ export default function MicroMedicsGame() {
         const hero = this.add.sprite(width/2, height/2 - 20, "playerCell").setScale(2);
         this.tweens.add({ targets: hero, y: hero.y - 10, yoyo: true, repeat:-1, duration:900 });
 
-        const btn = this.add.text(width/2, height-120, "START", {
+        const playBtn = this.add.text(width/2, height-120, "PLAY", {
           fontSize:"26px", color:"#0a0012", fontFamily:"Arial",
           backgroundColor:"#00f5d4", padding:{x:16,y:10}
         }).setOrigin(0.5).setInteractive({useHandCursor:true});
+        playBtn.on("pointerdown", () => this.scene.start("Cinematic"));
+
+        const howBtn = this.add.text(width/2, height-50, "HOW TO PLAY", {
+          fontSize:"18px", color:"#ffffff", fontFamily:"Arial",
+          backgroundColor:"#1f2937", padding:{x:12,y:6}
+        }).setOrigin(0.5).setInteractive({useHandCursor:true});
+        howBtn.on("pointerdown", () => this.scene.start("HowTo"));
 
         this.add.text(width/2, height-80, "Use ← → to move, ↑ to jump", { fontSize:"14px", color:"#fff" }).setOrigin(0.5);
-
-        btn.on("pointerdown", () => this.scene.start("Cinematic"));
       }
     }
 
+    class HowToScene extends Phaser.Scene {
+      constructor(){ super("HowTo"); }
+      
+      create() {
+        const { width, height } = this.scale;
+        this.cameras.main.setBackgroundColor("#0d0a15");
+        
+        // Title
+        this.add.text(width/2, 80, "How to Play", {
+          fontSize:"36px", color:"#ffffff", fontFamily:"Arial"
+        }).setOrigin(0.5);
+        
+        this.add.text(width/2, 120, "These are the exact same icons used in the game.", {
+          fontSize:"16px", color:"#ffd700", fontFamily:"Arial"
+        }).setOrigin(0.5);
+        
+        
+        const makeCard = (x, y, key, label, desc) => {
+          const cardW = 220, cardH = 140;
+          const bg = this.add.rectangle(x, y, cardW, cardH, 0xffffff, 0.06).setStrokeStyle(1, 0xffffff, 0.15);
+          const icon = this.add.sprite(x, y - 20, key);
+          
+          if (key === "playerCell") icon.setScale(3);
+          if (key === "energyOrb") icon.setScale(2.4);
+          if (key === "brainPower") icon.setScale(2.2);
+          if (key === "virusRed") icon.setScale(2.4);
+          const title = this.add.text(x, y + 20, label, { fontSize:"16px", color:"#ffffff", fontFamily:"Arial" }).setOrigin(0.5);
+          const txt = this.add.text(x, y + 44, desc, {
+            fontSize:"12px", color:"#cbd5e1", fontFamily:"Arial",
+            wordWrap:{ width: cardW - 20 }, align:"center"
+          }).setOrigin(0.5);
+          return { bg, icon, title, txt };
+        };
+        
+        const cx = width/2;
+        makeCard(cx - 260, 230, "playerCell", "Player (Ambulance/Cell)", "Move ← →, Jump ↑. Collect energy and avoid viruses.");
+        makeCard(cx,        230, "energyOrb",  "Energy Dot",            "Collect all energy to complete the level.");
+        makeCard(cx + 260,  230, "virusRed",   "Enemy (Virus)",         "Touching a virus costs a life. In power mode you can chomp it.");
+        makeCard(cx,        390, "brainPower", "Power-up (Brain)",      "Grants power mode for a short time.");
+        
+        // Controls
+        this.add.text(width/2, 480, "Controls", { fontSize:"20px", color:"#ffffff", fontFamily:"Arial" }).setOrigin(0.5);
+        this.add.text(width/2, 498, "Desktop: Arrow keys (← →) to move, ↑ to jump • Mobile: On-screen buttons", {
+          fontSize:"14px", color:"#ffd700", fontFamily:"Arial", wordWrap:{ width: 680 }, align:"center"
+        }).setOrigin(0.5);
+        
+        // Buttons
+        const startBtn = this.add.text(width/2, height-60, "Start ▶", {
+          fontSize:"20px", color:"#0a0012", backgroundColor:"#ffd700", padding:{x:14,y:8}, fontFamily:"Arial"
+        }).setOrigin(0.5).setInteractive({useHandCursor:true});
+        
+        const backBtn = this.add.text(80, height-50, "◀ Back", {
+          fontSize:"14px", color:"#ffffff", fontFamily:"Arial"
+        }).setInteractive({useHandCursor:true});
+        
+        startBtn.on("pointerdown", () => this.scene.start("Cinematic")); 
+        backBtn.on("pointerdown",  () => this.scene.start("Title"));     
+        
+        // También permitir avanzar con click/tap en cualquier lugar (opcional)
+        this.input.once("pointerdown", (p, objs) => {
+          // si no tocó un botón, también inicia
+          if (!objs || objs.length === 0) this.scene.start("Cinematic");
+        });
+      }
+    }
     // ------------- Cinematic (3 slides - old) -------------
     // class CinematicScene extends Phaser.Scene {
     //   constructor(){ super("Cinematic"); this.slide=0; }
@@ -403,7 +479,10 @@ export default function MicroMedicsGame() {
           else {
             if (this.time.now - this.lastHitAt < this.HIT_COOLDOWN_MS) return;
             this.lastHitAt = this.time.now;
-            G.health -= 10; if (G.health<0) G.health=0; this.cameras.main.shake(160,0.01); G.syncHud();
+            G.health -= 1; if (G.health<0) G.health=0; this.cameras.main.shake(160,0.01); G.syncHud();
+            if (G.health <= 0) {
+              this.gameOver(); 
+            }
           }
         });
 
@@ -425,22 +504,37 @@ export default function MicroMedicsGame() {
         this.viruses.children.iterate(v=>v && (v.vulnerable=false, v.clearTint()));
       }
       complete() {
-        if (this._completed) return; this._completed=true;
+        if (this._completed) return; this._completed = true;
         const { width, height } = this.scale;
         this.physics.pause();
-        this.add.rectangle(width/2,height/2,width,180,0x000000,0.65);
-        this.add.text(width/2,height/2 - 28,"Circulatory Stable!",{fontSize:"28px",color:"#00ffad",fontFamily:"Arial"}).setOrigin(0.5);
-        this.add.text(width/2,height/2 + 2,"+1 Star  •  Fact unlocked",{fontSize:"16px",color:"#fff"}).setOrigin(0.5);
-
+        
+        const { text: factText, nextIndex } = nextFact("heart", G.factIndex.heart);
+        G.factIndex.heart = nextIndex;
+        
+        this.add.rectangle(width/2, height/2, width, 200, 0x000000, 0.65);
+        this.add.text(width/2, height/2 - 36, "Circulatory Stable!", {
+          fontSize:"28px", color:"#00ffad", fontFamily:"Arial"
+        }).setOrigin(0.5);
+        this.add.text(width/2, height/2 - 6, "+1 Star  •  Fact unlocked", {
+          fontSize:"16px", color:"#ffffff", fontFamily:"Arial"
+        }).setOrigin(0.5);
+        
+        this.add.text(width/2, height/2 + 28, `Fact: ${factText}`, {
+          fontSize:"14px", color:"#ffd700", fontFamily:"Arial",
+          wordWrap:{ width: width - 120 }, align:"center"
+        }).setOrigin(0.5);
+        
         addStars(1);
-        addFact("The heart pumps ~100,000 times per day.");
+        addFact(factText);
         setSystem("heart", true);
-
-        const btn = this.add.text(width/2, height/2 + 48, "Claim Reward & Continue", {
+        G.persist();
+        
+        const btn = this.add.text(width/2, height/2 + 68, "Claim Reward & Continue", {
           fontSize:"18px", color:"#0a0012", backgroundColor:"#ffd700", padding:{x:12,y:6}, fontFamily:"Arial"
         }).setOrigin(0.5).setInteractive({useHandCursor:true});
         btn.on("pointerdown", () => this.scene.start("BodyMap"));
       }
+
       update(_, dt) {
         if (this._completed) return;
         if (G.powerMode) { G.powerTimer -= dt; if (G.powerTimer<=0) this.endPower(); }
@@ -456,8 +550,27 @@ export default function MicroMedicsGame() {
           }
         });
         if (G.energy>=10 && (this._brain || this._virus)) this.complete();
-        if (G.health<=0) this.scene.restart();
+        if (G.health<=0) return;
       }
+      gameOver() {
+        const { width, height } = this.scale;
+        this.physics.pause();
+        this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.5);
+        this.add.text(width/2, height/2 - 40, "GAME OVER", {
+          fontSize: "48px",
+          color: "#ff4444",
+          fontFamily: "Arial"
+        }).setOrigin(0.5);
+        this.add.text(width/2, height/2 + 20, "Press R to Restart", {
+          fontSize: "20px",
+          color: "#ffffff",
+          fontFamily: "Arial"
+        }).setOrigin(0.5);
+        this.input.keyboard.once("keydown-R", () => {
+          this.scene.restart();
+        });
+      }
+      
     }
 
     // ───────────────── Body Map (Homescapes-style) ─────────────────
@@ -514,15 +627,39 @@ export default function MicroMedicsGame() {
           fontFamily: "Arial", fontSize: 14, color: "#ffd700"
         });
 
+        // const factsToShow = G.facts.slice(-3);
+        // if (factsToShow.length === 0) {
+        //   line("— (complete a level to unlock)", 154);
+        // } else {
+        //   factsToShow.forEach((f, i) => {
+        //     this.add.text(x0 + 10, y0 + 154 + i*20, `• ${f}`, {
+        //       fontFamily: "Arial", fontSize: 13, color: "#ffffff",
+        //       wordWrap: { width: LEFT_W - 40 }
+        //     });
+        //   });
+        // }
+        // Replace the facts display section in BodyMapScene.create() with this:
+
         const factsToShow = G.facts.slice(-3);
         if (factsToShow.length === 0) {
           line("— (complete a level to unlock)", 154);
         } else {
+          let currentY = y0 + 154;
+          
           factsToShow.forEach((f, i) => {
-            this.add.text(x0 + 10, y0 + 154 + i*20, `• ${f}`, {
-              fontFamily: "Arial", fontSize: 13, color: "#ffffff",
+            const factText = this.add.text(x0 + 10, currentY, `• ${f}`, {
+              fontFamily: "Arial", 
+              fontSize: 13, 
+              color: "#ffffff",
               wordWrap: { width: LEFT_W - 40 }
             });
+            
+            // Calculate actual height of the rendered text
+            const textBounds = factText.getBounds();
+            const textHeight = textBounds.height;
+            
+            // Move to next position with proper spacing
+            currentY += textHeight + 8; // 8px padding between facts
           });
         }
 
@@ -700,7 +837,10 @@ export default function MicroMedicsGame() {
           else {
             if (this.time.now - this.lastHitAt < this.HIT_COOLDOWN_MS) return;
             this.lastHitAt = this.time.now;
-            G.health -= 10; if (G.health<0) G.health=0; this.cameras.main.shake(160,0.01); G.syncHud();
+            G.health -= 1; if (G.health<0) G.health=0; this.cameras.main.shake(160,0.01); G.syncHud();
+            if (G.health <= 0) {
+              this.gameOver();
+            }
           }
         });
 
@@ -715,18 +855,32 @@ export default function MicroMedicsGame() {
       activatePower(ms){ G.powerMode=true; G.powerTimer=ms; this.player.setTint(0x66ffcc); this.viruses.children.iterate(v=>v && (v.vulnerable=true, v.setTint(0x2ecc71))); }
       endPower(){ G.powerMode=false; G.powerTimer=0; this.player.clearTint(); this.viruses.children.iterate(v=>v && (v.vulnerable=false, v.clearTint())); }
       complete(){
-        if (this._completed) return; this._completed=true;
+        if (this._completed) return; this._completed = true;
         const { width, height } = this.scale;
         this.physics.pause();
-        this.add.rectangle(width/2,height/2,width,180,0x000000,0.65);
-        this.add.text(width/2,height/2 - 28,"Respiratory Stable!",{fontSize:"28px",color:"#00ffad"}).setOrigin(0.5);
-        this.add.text(width/2,height/2 + 2,"+1 Star  •  Fact unlocked",{fontSize:"16px",color:"#fff"}).setOrigin(0.5);
-
+        
+        const { text: factText, nextIndex } = nextFact("lungs", G.factIndex.lungs);
+        G.factIndex.lungs = nextIndex;
+          
+        this.add.rectangle(width/2, height/2, width, 200, 0x000000, 0.65);
+        this.add.text(width/2, height/2 - 36, "Respiratory Stable!", {
+          fontSize:"28px", color:"#00ffad"
+        }).setOrigin(0.5);
+        this.add.text(width/2, height/2 - 6, "+1 Star  •  Fact unlocked", {
+          fontSize:"16px", color:"#fff"
+        }).setOrigin(0.5);
+          
+        this.add.text(width/2, height/2 + 28, `Fact: ${factText}`, {
+          fontSize:"14px", color:"#ffd700", fontFamily:"Arial",
+          wordWrap:{ width: width - 120 }, align:"center"
+        }).setOrigin(0.5);
+          
         addStars(1);
-        addFact("Alveoli are tiny sacs where oxygen enters the blood.");
+        addFact(factText);
         setSystem("lungs", true);
-
-        const btn = this.add.text(width/2, height/2 + 48, "Back to Body Map", {
+        G.persist();
+          
+        const btn = this.add.text(width/2, height/2 + 68, "Back to Body Map", {
           fontSize:"18px", color:"#0a0012", backgroundColor:"#ffd700", padding:{x:12,y:6}
         }).setOrigin(0.5).setInteractive({useHandCursor:true});
         btn.on("pointerdown", ()=> this.scene.start("BodyMap"));
@@ -747,9 +901,29 @@ export default function MicroMedicsGame() {
             v.body.velocity.y += Math.sin(a)*10;
           }
         });
-        if (G.health<=0) this.scene.restart();
+        if (G.health<=0) return;
         if (G.energy>=12 && (this._brain || this._virus)) this.complete();
       }
+      gameOver() {
+        const { width, height } = this.scale;
+        this.physics.pause();
+        this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.5);
+        this.add.text(width/2, height/2 - 40, "GAME OVER", {
+          fontSize: "48px",
+          color: "#ff4444",
+          fontFamily: "Arial"
+        }).setOrigin(0.5);
+        this.add.text(width/2, height/2 + 20, "Press R to Restart", {
+          fontSize: "20px",
+          color: "#ffffff",
+          fontFamily: "Arial"
+        }).setOrigin(0.5);
+        this.input.keyboard.once("keydown-R", () => {
+          this.scene.restart();
+        });
+      }
+
+
     }
 
     // ------------- Phaser config -------------
@@ -760,7 +934,7 @@ export default function MicroMedicsGame() {
       parent: gameParentRef.current,
       backgroundColor: "#0c0c0c",
       physics: { default: "arcade", arcade: { gravity: { y: 400 }, debug: false } },
-      scene: [BootScene, TitleScene, CinematicScene, CirculatoryLevel, BodyMapScene, LungsLevel],
+      scene: [BootScene, TitleScene, HowToScene, CinematicScene, CirculatoryLevel, BodyMapScene, LungsLevel],
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       render: { antialias: false },
     };
@@ -790,12 +964,12 @@ export default function MicroMedicsGame() {
       }}
     >
       <div style={{ width:"100%", maxWidth:1200, padding:"0 16px" }}>
-        <h1 style={{ fontSize:28, fontWeight:900, margin:0 }}>MicroMedics — Scene 1 & 2</h1>
-        <div style={{ opacity:0.75, marginTop:4 }}>Arcade core + Homescapes-style meta (React + Phaser)</div>
-        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+        <h1 style={{ fontSize:28, fontWeight:900, margin:0 }}>MicroMedics </h1>
+        <div style={{ opacity:0.75, marginTop:4 }}>Arcade core </div>
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", justifyContent:"center" }}>
           <Badge>⭐ Stars: <b>{stars}</b></Badge>
           <Badge>🏆 Score: <b>{hud.score}</b></Badge>
-          <Badge>❤️ Health: <b>{hud.health}</b></Badge>
+          <Badge>❤️ Lives: <b>{hud.health}</b></Badge>
           <Badge>⚡ Energy: <b>{hud.energy}</b></Badge>
           <Badge>🧠 Level: <b>{hud.level}</b></Badge>
           <Badge>⏱️ Time on task: <b>{mmss(playtime)}</b></Badge>
@@ -808,8 +982,8 @@ export default function MicroMedicsGame() {
         <div ref={gameParentRef} style={{ width:"100%", height:"100%" }} />
       </div>
 
-      <div style={{ width:"100%", maxWidth:1200, display:"grid", gridTemplateColumns:"1fr 2fr", gap:16, marginTop:16 }}>
-        <Card title="Recent Facts">
+      {/* <div style={{ width:"100%", maxWidth:1200, display:"grid", gridTemplateColumns:"1fr 2fr", gap:16, marginTop:16 }}>
+        <Card title="The Know Zone">
           {facts.length === 0 ? (
             <p style={{ opacity:0.7, fontSize:14, margin:0 }}>Complete a level to unlock facts.</p>
           ) : (
@@ -826,7 +1000,7 @@ export default function MicroMedicsGame() {
             <li style={{ margin:"4px 0" }}>Time on task (⏱️) updates in real time for demos.</li>
           </ul>
         </Card>
-      </div>
+      </div> */}
     </div>
   );
 }
